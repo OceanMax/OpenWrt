@@ -64,11 +64,16 @@ jobs:
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
     
     - name: Update feeds
-      run: cd openwrt && ./scripts/feeds update -a
+      run: |
+        cd openwrt 
+        ./scripts/feeds update -a
+        ./scripts/feeds update packages
 
     - name: Install feeds
       run: |
-        cd openwrt && ./scripts/feeds install -a
+        cd openwrt
+        ./scripts/feeds install -a
+        ./scripts/feeds install -a -p packages
 
     - name: Load custom configuration
       run: |
