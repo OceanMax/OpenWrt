@@ -37,8 +37,10 @@ jobs:
         DEBIAN_FRONTEND: noninteractive
       run: |
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
-        sudo docker image prune --all --force
-        sudo bash -c 'bash <(curl -s https://build-scripts.immortalwrt.org/init_build_environment.sh)'
+        sudo apt update -y
+        sudo apt full-upgrade -y
+        sudo apt install -y dos2unix libfuse-dev
+        sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
         sudo timedatectl set-timezone "$TZ"
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
@@ -51,6 +53,7 @@ jobs:
         dotnet: true
         haskell: true
         large-packages: true
+        docker-images: true
         swap-storage: true
 
     - name: Clone source code
