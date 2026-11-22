@@ -11,7 +11,7 @@
 
 
 # r8169
-# sed -i 's,kmod-r8168,kmod-r8169,g' target/linux/rockchip/image/armv8.mk
+sed -i 's,kmod-r8168,kmod-r8169,g' target/linux/rockchip/image/armv8.mk
 
 # Modify default IP
 sed -i 's/192.168.1.1/192.168.5.1/g' package/base-files/files/bin/config_generate
