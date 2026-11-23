@@ -13,7 +13,6 @@ name: Update Checker
 
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt
-  REPO_BRANCH: openwrt-25.12
 
 on:
   workflow_dispatch:
@@ -22,15 +21,25 @@ on:
 
 jobs:
   check:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
 
-    - name: Get Commit Hash
+    - name: Detect Latest Branch & Get Commit Hash
       id: getHash
       run: |
-        git clone --depth 1 $REPO_URL -b $REPO_BRANCH .
-        echo "commitHash=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+        LATEST_BRANCH=$(git ls-remote --heads "$REPO_URL" \
+          | awk -F'refs/heads/' '{print $2}' \
+          | grep -E '^openwrt-[0-9]+\.[0-9]+' \
+          | sort -V \
+          | tail -n 1)
+
+        REPO_BRANCH="${LATEST_BRANCH:-openwrt-25.12}"
+        echo "REPO_BRANCH=$REPO_BRANCH" >> "$GITHUB_ENV"
+        echo "Using branch: $REPO_BRANCH"
+
+        git clone --depth 1 "$REPO_URL" -b "$REPO_BRANCH" .
+        echo "commitHash=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
     - name: Compare Commit Hash
       id: cacheHash
