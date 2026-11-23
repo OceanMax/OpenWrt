@@ -25,51 +25,78 @@ jobs:
 
     steps:
 
-    - name: Detect Latest Tag & Get Commit Hash
+    - name: Detect Latest Ref & Get Commit Hash
       id: getTag
       run: |
-        # 获取远端所有 tags（排除 ^{} 解引用行，并过滤掉 rc/alpha/beta 等预发布标签）
-        LATEST_TAG=$(git ls-remote --tags --refs "$REPO_URL" \
-          | awk -F'refs/tags/' '{print $2}' \
-          | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' \
-          | sed 's/^v//' \
+        # 1. 优先获取最新的发布分支（兼容 openwrt-YY.MM 和 YY.MM）
+        LATEST_BRANCH=$(git ls-remote --heads "$REPO_URL" \
+          | awk -F'refs/heads/' '{print $2}' \
+          | grep -E '^(openwrt-)?[0-9]+\.[0-9]+$' \
           | sort -V \
           | tail -n 1)
 
-        if [ -z "$LATEST_TAG" ]; then
-          echo "未检测到符合条件的 Tag"
+        # 若没有匹配的发布分支，仅回退到远端现有分支（不回退到 master）
+        if [ -z "$LATEST_BRANCH" ]; then
+          LATEST_BRANCH=$(git ls-remote --heads "$REPO_URL" \
+            | awk -F'refs/heads/' '{print $2}' \
+            | tail -n 1)
+        fi
+
+        if [ -z "$LATEST_BRANCH" ]; then
+          echo "未检测到任何可用分支"
           exit 1
         fi
 
-        # 还原原 tag 名（若远端带 v 前缀则补回 v）
-        if git ls-remote --tags --refs "$REPO_URL" | grep -q "refs/tags/v${LATEST_TAG}$"; then
-          LATEST_TAG="v${LATEST_TAG}"
+        # 2. 若为发布分支格式，查找该分支系列下的最新正式 Tag
+        LATEST_TAG=""
+        if echo "$LATEST_BRANCH" | grep -qE '^(openwrt-)?[0-9]+\.[0-9]+$'; then
+          BRANCH_VER=$(echo "$LATEST_BRANCH" | sed 's/^openwrt-//')
+          LATEST_TAG=$(git ls-remote --tags --refs "$REPO_URL" \
+            | awk -F'refs/tags/' '{print $2}' \
+            | grep -E "^v?${BRANCH_VER}\.[0-9]+$" \
+            | sed 's/^v//' \
+            | sort -V \
+            | tail -n 1)
         fi
 
-        echo "LATEST_TAG=$LATEST_TAG" >> "$GITHUB_ENV"
-        echo "latestTag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
-        echo "Using tag: $LATEST_TAG"
+        # 3. 有对应 Tag 则用最新 Tag；没有则回退使用最新分支
+        if [ -n "$LATEST_TAG" ]; then
+          if git ls-remote --tags --refs "$REPO_URL" | grep -q "refs/tags/v${LATEST_TAG}$"; then
+            TARGET_REF="v${LATEST_TAG}"
+          else
+            TARGET_REF="$LATEST_TAG"
+          fi
+          echo "检测到最新分支 $LATEST_BRANCH 下的最新 Tag: $TARGET_REF"
+        else
+          TARGET_REF="$LATEST_BRANCH"
+          echo "未找到对应 Tag，回退使用分支: $TARGET_REF"
+        fi
 
-        git clone --depth 1 --branch "$LATEST_TAG" "$REPO_URL" .
+        # 保留原有输出变量名 latestTag / LATEST_TAG，避免改动下游引用
+        echo "LATEST_TAG=$TARGET_REF" >> "$GITHUB_ENV"
+        echo "latestTag=$TARGET_REF" >> "$GITHUB_OUTPUT"
+        echo "Using ref: $TARGET_REF"
+
+        git clone --depth 1 --branch "$TARGET_REF" "$REPO_URL" .
         COMMIT_HASH=$(git rev-parse HEAD)
         echo "commitHash=$COMMIT_HASH" >> "$GITHUB_OUTPUT"
         echo "Commit hash: $COMMIT_HASH"
 
-    - name: Compare Tag State
+    - name: Compare Ref State
       id: cacheTag
       uses: actions/cache@v5
       with:
         path: .tagState
         key: tag-${{ steps.getTag.outputs.latestTag }}-${{ steps.getTag.outputs.commitHash }}
 
-    - name: Save New Tag State
+    - name: Save New Ref State
       if: steps.cacheTag.outputs.cache-hit != 'true'
       run: |
         {
-          echo "tag=${{ steps.getTag.outputs.latestTag }}"
+          echo "ref=${{ steps.getTag.outputs.latestTag }}"
           echo "commit=${{ steps.getTag.outputs.commitHash }}"
         } | tee .tagState
-        echo "检测到新 Tag 或首次记录：${{ steps.getTag.outputs.latestTag }}（${{ steps.getTag.outputs.commitHash }}），请按需手动运行 Build OpenWrt。"
+        echo "检测到新版本或首次记录：${{ steps.getTag.outputs.latestTag }}（${{ steps.getTag.outputs.commitHash }}），请按需手动运行 Build OpenWrt。"
 
     - name: Delete workflow runs
       uses: Mattraks/delete-workflow-runs@v2
