@@ -15,8 +15,8 @@ on:
     types: [Source Code Update]
   workflow_dispatch:
     inputs:
-      branch:
-        description:
+      ref:
+        description: "指定源码分支（留空则优先使用事件载荷或自动识别最新分支）"
         required: false
         default: ""
         type: string
@@ -40,30 +40,40 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Detect target branch
-        id: detect_branch
+      - name: Detect target tag or branch
+        id: detect_ref
         run: |
+          PAYLOAD_TAG="${{ github.event.client_payload.tag }}"
           PAYLOAD_BRANCH="${{ github.event.client_payload.branch }}"
-          INPUT_BRANCH="${{ inputs.branch }}"
+          INPUT_REF="${{ inputs.ref }}"
 
-          if [ -n "$PAYLOAD_BRANCH" ]; then
-            TARGET_BRANCH="$PAYLOAD_BRANCH"
-            echo "Branch source: repository_dispatch payload"
-          elif [ -n "$INPUT_BRANCH" ]; then
-            TARGET_BRANCH="$INPUT_BRANCH"
-            echo "Branch source: workflow_dispatch input"
+          if [ -n "$PAYLOAD_TAG" ]; then
+            TARGET_REF="$PAYLOAD_TAG"
+            echo "Ref source: repository_dispatch payload.tag"
+          elif [ -n "$PAYLOAD_BRANCH" ]; then
+            TARGET_REF="$PAYLOAD_BRANCH"
+            echo "Ref source: repository_dispatch payload.branch"
+          elif [ -n "$INPUT_REF" ]; then
+            TARGET_REF="$INPUT_REF"
+            echo "Ref source: workflow_dispatch input.ref"
           else
-            LATEST_BRANCH=$(git ls-remote --heads "$REPO_URL" \
-              | awk -F'refs/heads/' '{print $2}' \
-              | grep -E '^openwrt-[0-9]+\.[0-9]+' \
+            LATEST_TAG=$(git ls-remote --tags --refs "$REPO_URL" \
+              | awk -F'refs/tags/' '{print $2}' \
+              | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' \
+              | sed 's/^v//' \
               | sort -V \
               | tail -n 1)
-            TARGET_BRANCH="${LATEST_BRANCH:-openwrt-25.12}"
-            echo "Branch source: auto-detect / fallback"
+
+            if [ -n "$LATEST_TAG" ] && git ls-remote --tags --refs "$REPO_URL" | grep -q "refs/tags/v${LATEST_TAG}$"; then
+              LATEST_TAG="v${LATEST_TAG}"
+            fi
+
+            TARGET_REF="${LATEST_TAG:-25.12.2}"
+            echo "Ref source: auto-detect latest tag / fallback"
           fi
 
-          echo "REPO_BRANCH=$TARGET_BRANCH" >> "$GITHUB_ENV"
-          echo "Selected REPO_BRANCH: $TARGET_BRANCH"
+          echo "SOURCE_REF=$TARGET_REF" >> "$GITHUB_ENV"
+          echo "Selected SOURCE_REF: $TARGET_REF"
 
       - name: Initialization environment
         env:
@@ -98,7 +108,7 @@ jobs:
         working-directory: /workdir
         run: |
           df -hT $PWD
-          git clone --depth=1 "$REPO_URL" -b "$REPO_BRANCH" openwrt
+          git clone --depth=1 "$REPO_URL" -b "$SOURCE_REF" openwrt
           ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
       - name: Update feeds
@@ -134,7 +144,7 @@ jobs:
         run: |
           cd openwrt
           echo -e "$(nproc) thread compile"
-          make -j$(nproc) || make -j1 || make -j1 V=s
+          make -j$(nproc) || make -j1 V=s
           echo "status=success" >> $GITHUB_OUTPUT
           grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
           [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
@@ -167,7 +177,7 @@ jobs:
           echo "release_tag=$(date +"%Y.%m.%d")" >> $GITHUB_OUTPUT
           echo "release_date=$(date +"%Y.%m.%d")" >> $GITHUB_OUTPUT
           touch release.txt
-          echo "Default login address: http://192.168.5.1 or http://immortalwrt.lan, username: root, password: none." >> release.txt
+          echo "Default login address: http://192.168.50.50 or http://immortalwrt.lan, username: root, password: none." >> release.txt
           echo "status=success" >> $GITHUB_OUTPUT
 
       - name: Upload firmware to release
