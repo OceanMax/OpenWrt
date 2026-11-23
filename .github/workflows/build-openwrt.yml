@@ -32,25 +32,50 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Detect latest tag
+      - name: Detect latest branch or tag
         id: detect_tag
         run: |
-          LATEST_TAG=$(git ls-remote --tags --refs "$REPO_URL" \
-            | awk -F'refs/tags/' '{print $2}' \
-            | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' \
-            | sed 's/^v//' \
+          # 1. 优先获取最新的发布分支（兼容 openwrt-YY.MM 和 YY.MM）
+          LATEST_BRANCH=$(git ls-remote --heads "$REPO_URL" \
+            | awk -F'refs/heads/' '{print $2}' \
+            | grep -E '^(openwrt-)?[0-9]+\.[0-9]+$' \
             | sort -V \
             | tail -n 1)
 
-          if [ -z "$LATEST_TAG" ]; then
-            echo "未检测到符合条件的 Tag，回退到默认 Tag: 25.12.2"
-            LATEST_TAG="25.12.2"
-          elif git ls-remote --tags --refs "$REPO_URL" | grep -q "refs/tags/v${LATEST_TAG}$"; then
-            LATEST_TAG="v${LATEST_TAG}"
+          # 若没有匹配的发布分支，仅回退到远端现有的其他分支（不回退到 master）
+          if [ -z "$LATEST_BRANCH" ]; then
+            LATEST_BRANCH=$(git ls-remote --heads "$REPO_URL" \
+              | awk -F'refs/heads/' '{print $2}' \
+              | tail -n 1)
           fi
 
-          echo "SOURCE_REF=$LATEST_TAG" >> "$GITHUB_ENV"
-          echo "Selected SOURCE_REF: $LATEST_TAG"
+          # 2. 如果当前分支是 YY.MM / openwrt-YY.MM 格式，查找该分支系列下的最新正式 Tag
+          LATEST_TAG=""
+          if echo "$LATEST_BRANCH" | grep -qE '^(openwrt-)?[0-9]+\.[0-9]+$'; then
+            BRANCH_VER=$(echo "$LATEST_BRANCH" | sed 's/^openwrt-//')
+            LATEST_TAG=$(git ls-remote --tags --refs "$REPO_URL" \
+              | awk -F'refs/tags/' '{print $2}' \
+              | grep -E "^v?${BRANCH_VER}\.[0-9]+$" \
+              | sed 's/^v//' \
+              | sort -V \
+              | tail -n 1)
+          fi
+
+          # 3. 有对应 Tag 则用最新 Tag；没有则直接使用最新分支
+          if [ -n "$LATEST_TAG" ]; then
+            if git ls-remote --tags --refs "$REPO_URL" | grep -q "refs/tags/v${LATEST_TAG}$"; then
+              SOURCE_REF="v${LATEST_TAG}"
+            else
+              SOURCE_REF="$LATEST_TAG"
+            fi
+            echo "检测到最新分支 $LATEST_BRANCH 下的最新 Tag: $SOURCE_REF"
+          else
+            SOURCE_REF="$LATEST_BRANCH"
+            echo "未找到对应 Tag，使用分支: $SOURCE_REF"
+          fi
+
+          echo "SOURCE_REF=$SOURCE_REF" >> "$GITHUB_ENV"
+          echo "Selected SOURCE_REF: $SOURCE_REF"
 
       - name: Initialization environment
         env:
