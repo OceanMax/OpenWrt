@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       branch:
-        description: "指定源码分支（留空则优先使用事件载荷或自动识别最新分支）"
+        description:
         required: false
         default: ""
         type: string
