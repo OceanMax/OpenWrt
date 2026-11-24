@@ -32,8 +32,8 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Detect latest branch or tag
-        id: detect_tag
+      - name: Detect latest branch
+        id: detect_branch
         run: |
           # 1. 优先获取最新的发布分支（兼容 openwrt-YY.MM 和 YY.MM）
           LATEST_BRANCH=$(git ls-remote --heads "$REPO_URL" \
@@ -49,33 +49,13 @@ jobs:
               | tail -n 1)
           fi
 
-          # 2. 如果当前分支是 YY.MM / openwrt-YY.MM 格式，查找该分支系列下的最新正式 Tag
-          LATEST_TAG=""
-          if echo "$LATEST_BRANCH" | grep -qE '^(openwrt-)?[0-9]+\.[0-9]+$'; then
-            BRANCH_VER=$(echo "$LATEST_BRANCH" | sed 's/^openwrt-//')
-            LATEST_TAG=$(git ls-remote --tags --refs "$REPO_URL" \
-              | awk -F'refs/tags/' '{print $2}' \
-              | grep -E "^v?${BRANCH_VER}\.[0-9]+$" \
-              | sed 's/^v//' \
-              | sort -V \
-              | tail -n 1)
+          if [ -z "$LATEST_BRANCH" ]; then
+            echo "未检测到任何可用分支"
+            exit 1
           fi
 
-          # 3. 有对应 Tag 则用最新 Tag；没有则直接使用最新分支
-          if [ -n "$LATEST_TAG" ]; then
-            if git ls-remote --tags --refs "$REPO_URL" | grep -q "refs/tags/v${LATEST_TAG}$"; then
-              SOURCE_REF="v${LATEST_TAG}"
-            else
-              SOURCE_REF="$LATEST_TAG"
-            fi
-            echo "检测到最新分支 $LATEST_BRANCH 下的最新 Tag: $SOURCE_REF"
-          else
-            SOURCE_REF="$LATEST_BRANCH"
-            echo "未找到对应 Tag，使用分支: $SOURCE_REF"
-          fi
-
-          echo "SOURCE_REF=$SOURCE_REF" >> "$GITHUB_ENV"
-          echo "Selected SOURCE_REF: $SOURCE_REF"
+          echo "LATEST_BRANCH=$LATEST_BRANCH" >> "$GITHUB_ENV"
+          echo "Selected LATEST_BRANCH: $LATEST_BRANCH"
 
       - name: Initialization environment
         env:
@@ -110,7 +90,7 @@ jobs:
         working-directory: /workdir
         run: |
           df -hT $PWD
-          git clone --depth=1 "$REPO_URL" -b "$SOURCE_REF" openwrt
+          git clone --depth=1 "$REPO_URL" -b "$LATEST_BRANCH" openwrt
           ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
       - name: Update feeds
